@@ -1,21 +1,21 @@
 /**
  * CF763 TTS Engine
  * 強制使用微軟真人神經語音 (Microsoft Neural / Edge-TTS)，嚴格排除所有 Google 語音。
- * 優先順序：
- *   1. 靜態預產微軟神經語音 MP3 (audio/ja/{id}.mp3 & audio/zh/{id}.mp3) — 公開網頁跨裝置通用（Chrome/Safari/iOS/Android/Edge）
- *   2. 本機 Edge-TTS 伺服器 (/api/tts) — 支援即時切換男聲 Keita / YunJhe
- *   3. Web Speech API 微軟系統語音備援（嚴格排除所有 Google 語音）
+ * 支援男女聲切換（Nanami/Keita、HsiaoChen/YunJhe）與即時變速（0.7x–1.4x）。
  */
 (function (global) {
   "use strict";
 
-  const PREFERRED_MS_JA = ["Nanami", "Keita", "Natural", "Haruka", "Ichiro", "Ayumi", "Sayaka"];
-  const PREFERRED_MS_ZH = ["HsiaoChen", "YunJhe", "HsiaoYu", "Natural", "Hanhan", "Zhiwei", "Yating"];
+  const PREFERRED_MS_JA_FEMALE = ["Nanami", "Haruka", "Ayumi", "Sayaka", "Natural"];
+  const PREFERRED_MS_JA_MALE = ["Keita", "Ichiro", "Natural"];
+  const PREFERRED_MS_ZH_FEMALE = ["HsiaoChen", "HsiaoYu", "Hanhan", "Yating", "Natural"];
+  const PREFERRED_MS_ZH_MALE = ["YunJhe", "Zhiwei", "Natural"];
 
   class TTSEngine {
     constructor() {
       this.serverAvailable = false;
       this.staticAudioAvailable = false;
+      this.staticMaleAvailable = false;
       this.staticManifest = null;
       this.jaVoice = localStorage.getItem("cf763_ja_voice") || "ja-JP-NanamiNeural";
       this.zhVoice = localStorage.getItem("cf763_zh_voice") || "zh-TW-HsiaoChenNeural";
@@ -42,18 +42,20 @@
     }
 
     async _probeBackends() {
-      // 1. 偵測預產靜態微軟神經語音包 (適用於 GitHub Pages / 公開網頁)
+      // 1. 偵測預產靜態微軟神經語音包
       try {
         const res = await fetch("audio/manifest.json", { cache: "no-store" });
         if (res.ok) {
           const manifest = await res.json();
           if (manifest && manifest.jaCount > 0) {
             this.staticAudioAvailable = true;
+            this.staticMaleAvailable = Boolean(manifest.jaMaleCount > 0 && manifest.zhMaleCount > 0);
             this.staticManifest = manifest;
           }
         }
       } catch (_) {
         this.staticAudioAvailable = false;
+        this.staticMaleAvailable = false;
       }
 
       // 2. 偵測本機 Edge-TTS 伺服器
@@ -77,21 +79,30 @@
       }
     }
 
+    isMaleSelected(lang) {
+      return lang === "ja" ? /Keita/i.test(this.jaVoice) : /YunJhe/i.test(this.zhVoice);
+    }
+
     getStatus() {
+      const jaShort = this.jaVoice.replace("ja-JP-", "").replace("Neural", "");
+      const zhShort = this.zhVoice.replace("zh-TW-", "").replace("Neural", "");
+
       if (this.serverAvailable) {
         return {
           mode: "edge-tts",
           ok: true,
-          label: `微軟神經語音 (${this.jaVoice.replace("ja-JP-", "").replace("Neural", "")} / ${this.zhVoice.replace("zh-TW-", "").replace("Neural", "")})`,
-          detail: "本機 Edge-TTS 伺服器已連線，支援男女聲即時切換",
+          label: `微軟神經語音 (${jaShort} / ${zhShort})`,
+          detail: "本機 Edge-TTS 伺服器已連線，支援男女聲切換與變速",
         };
       }
       if (this.staticAudioAvailable) {
         return {
           mode: "static-neural",
           ok: true,
-          label: "微軟神經語音 (Nanami / HsiaoChen 內建音檔)",
-          detail: "已載入預先產製之微軟真人神經語音 MP3，Chrome / Safari / 手機皆可流暢播放",
+          label: `微軟神經語音 (${jaShort} / ${zhShort} 內建音檔)`,
+          detail: this.staticMaleAvailable
+            ? "已載入微軟男女雙聲神經語音 MP3，全瀏覽器皆可切換男女聲與變速"
+            : "已載入微軟神經語音 MP3（女聲全套；男聲將優先使用本機或 Edge 微軟男聲）",
         };
       }
       const msJa = this._pickMicrosoftWebVoice("ja");
@@ -129,6 +140,7 @@
       localStorage.setItem("cf763_tts_rate", String(this.rate));
       if (this.currentAudio) {
         try {
+          this.currentAudio.defaultPlaybackRate = this.rate;
           this.currentAudio.playbackRate = this.rate;
         } catch (_) {}
       }
@@ -136,9 +148,18 @@
 
     _pickMicrosoftWebVoice(lang) {
       const isJa = lang === "ja";
+      const isMale = this.isMaleSelected(lang);
       const langRegex = isJa ? /^ja(-|_|$)/i : /^zh(-|_)?(TW|Hant)/i;
       const fallbackLangRegex = isJa ? /^ja/i : /^zh/i;
-      const preferredNames = isJa ? PREFERRED_MS_JA : PREFERRED_MS_ZH;
+
+      // 依使用者選擇的男女聲優先排序
+      const preferredNames = isJa
+        ? isMale
+          ? [...PREFERRED_MS_JA_MALE, ...PREFERRED_MS_JA_FEMALE]
+          : [...PREFERRED_MS_JA_FEMALE, ...PREFERRED_MS_JA_MALE]
+        : isMale
+        ? [...PREFERRED_MS_ZH_MALE, ...PREFERRED_MS_ZH_FEMALE]
+        : [...PREFERRED_MS_ZH_FEMALE, ...PREFERRED_MS_ZH_MALE];
 
       const msCandidates = this.speechVoices.filter(
         (v) => !/google/i.test(v.name) && /microsoft/i.test(v.name) && (langRegex.test(v.lang) || fallbackLangRegex.test(v.lang))
@@ -172,25 +193,30 @@
       }
     }
 
-    _shouldUseStatic(lang, audioPath) {
-      if (!this.staticAudioAvailable || !audioPath) return false;
-      // 若本機伺服器可用且使用者選擇了男聲 (非靜態預產的預設女聲)，改走本機伺服器
-      if (this.serverAvailable) {
-        const defaultStaticVoice = lang === "ja" ? "ja-JP-NanamiNeural" : "zh-TW-HsiaoChenNeural";
-        const selectedVoice = lang === "ja" ? this.jaVoice : this.zhVoice;
-        if (selectedVoice !== defaultStaticVoice) return false;
+    _resolveStaticPath(lang, audioPath) {
+      if (!audioPath) return null;
+      const isMale = this.isMaleSelected(lang);
+      if (!isMale) {
+        return this.staticAudioAvailable ? audioPath : null;
       }
-      return true;
+      // 男聲：若有預產男聲靜態包，自動對應到 ja_m / zh_m / test_ja_m / test_zh_m
+      if (this.staticMaleAvailable) {
+        if (audioPath === "audio/test_ja.mp3") return "audio/test_ja_m.mp3";
+        if (audioPath === "audio/test_zh.mp3") return "audio/test_zh_m.mp3";
+        return audioPath.replace(/^audio\/(ja|zh)\//, "audio/$1_m/");
+      }
+      return null;
     }
 
     prefetch(text, lang, audioPath = null) {
-      if (this._shouldUseStatic(lang, audioPath)) {
-        fetch(audioPath).catch(() => {});
+      const staticUrl = this._resolveStaticPath(lang, audioPath);
+      if (staticUrl) {
+        fetch(staticUrl).catch(() => {});
         return;
       }
       if (!this.serverAvailable || !text) return;
       const voice = lang === "ja" ? this.jaVoice : this.zhVoice;
-      const url = `/api/tts?text=${encodeURIComponent(text)}&lang=${encodeURIComponent(lang)}&voice=${encodeURIComponent(voice)}&rate=${encodeURIComponent(this.rate.toFixed(2))}`;
+      const url = `/api/tts?text=${encodeURIComponent(text)}&lang=${encodeURIComponent(lang)}&voice=${encodeURIComponent(voice)}&rate=1.00`;
       fetch(url).catch(() => {});
     }
 
@@ -203,13 +229,19 @@
       return this._speakKeepingToken(cleanText, lang, token, audioPath);
     }
 
-    _playAudioUrl(url, token, applyPlaybackRate = false) {
+    _playAudioUrl(url, token) {
       return new Promise((resolve, reject) => {
         if (token !== this.activeToken) return resolve();
         const audio = new Audio(url);
-        if (applyPlaybackRate) {
-          audio.playbackRate = this.rate;
-        }
+        const applyRate = () => {
+          try {
+            audio.defaultPlaybackRate = this.rate;
+            audio.playbackRate = this.rate;
+          } catch (_) {}
+        };
+        applyRate();
+        audio.addEventListener("loadedmetadata", applyRate);
+        audio.addEventListener("playing", applyRate);
         this.currentAudio = audio;
 
         const cleanup = () => {
@@ -224,7 +256,7 @@
           cleanup();
           reject(new Error("AUDIO_LOAD_FAILED"));
         };
-        audio.play().catch((err) => {
+        audio.play().then(applyRate).catch((err) => {
           cleanup();
           if (token !== this.activeToken) return resolve();
           reject(err);
@@ -233,40 +265,55 @@
     }
 
     async _speakKeepingToken(text, lang, seqToken, audioPath = null) {
-      // 1. 優先使用預先產製的微軟神經語音靜態 MP3
-      if (this._shouldUseStatic(lang, audioPath)) {
+      // 1. 優先使用符合所選男女聲的靜態微軟神經語音 MP3（並即時套用 playbackRate 變速）
+      const staticUrl = this._resolveStaticPath(lang, audioPath);
+      if (staticUrl) {
         try {
-          await this._playAudioUrl(audioPath, seqToken, true);
+          await this._playAudioUrl(staticUrl, seqToken);
           return;
-        } catch (err) {
+        } catch (_) {
           if (seqToken !== this.activeToken) return;
-          // 檔案不存在或載入失敗時退回下一層
         }
       }
 
-      // 2. 次選本機 Edge-TTS 伺服器
+      // 2. 次選本機 Edge-TTS 伺服器（支援即時切換男聲 Keita / YunJhe，並套用 playbackRate）
       if (this.serverAvailable && text) {
         const voice = lang === "ja" ? this.jaVoice : this.zhVoice;
-        const url = `/api/tts?text=${encodeURIComponent(text)}&lang=${encodeURIComponent(lang)}&voice=${encodeURIComponent(voice)}&rate=${encodeURIComponent(this.rate.toFixed(2))}`;
+        const url = `/api/tts?text=${encodeURIComponent(text)}&lang=${encodeURIComponent(lang)}&voice=${encodeURIComponent(voice)}&rate=1.00`;
         try {
-          await this._playAudioUrl(url, seqToken, false);
+          await this._playAudioUrl(url, seqToken);
           return;
-        } catch (err) {
+        } catch (_) {
           if (seqToken !== this.activeToken) return;
         }
       }
 
-      // 3. 最後備援：嚴格排除 Google 的微軟系統語音
-      return this._speakViaWebSpeech(text, lang, seqToken);
+      // 3. 若選了男聲且無男聲靜態包／本機伺服器，優先嘗試微軟系統男聲 (Edge)
+      const msVoice = this._pickMicrosoftWebVoice(lang);
+      if (msVoice) {
+        return this._speakViaWebSpeech(text, lang, seqToken, msVoice);
+      }
+
+      // 4. 若系統無微軟男聲（例如 Chrome 靜態版），退回內建女聲微軟神經語音 MP3（不退回 Google 語音）
+      if (this.staticAudioAvailable && audioPath) {
+        try {
+          await this._playAudioUrl(audioPath, seqToken);
+          return;
+        } catch (_) {
+          if (seqToken !== this.activeToken) return;
+        }
+      }
+
+      throw new Error("未找到可用的微軟語音（已依規範封鎖 Google 語音）。");
     }
 
-    _speakViaWebSpeech(text, lang, token) {
+    _speakViaWebSpeech(text, lang, token, preselectedVoice = null) {
       return new Promise((resolve, reject) => {
         if (token !== this.activeToken) return resolve();
         if (!("speechSynthesis" in global)) {
           return reject(new Error("瀏覽器不支援語音合成。"));
         }
-        const voice = this._pickMicrosoftWebVoice(lang);
+        const voice = preselectedVoice || this._pickMicrosoftWebVoice(lang);
         if (!voice) {
           return reject(new Error("未找到可用的微軟語音（已依規範封鎖 Google 語音）。"));
         }
