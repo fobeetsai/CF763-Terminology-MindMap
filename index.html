@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CF763 中日工程術語｜心智圖・互動複習・微軟真人語音朗讀</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-badge">CF763</div>
+      <div>
+        <div class="brand-title">中日工程術語互動學習系統</div>
+        <div class="brand-sub" id="brandStats">載入中…</div>
+      </div>
+    </div>
+
+    <nav class="nav-tabs" role="tablist">
+      <button class="nav-tab active" data-view="mindmap">🧠 分門別類心智圖</button>
+      <button class="nav-tab" data-view="browse">🔊 朗讀與總覽</button>
+      <button class="nav-tab" data-view="flashcard">🃏 閃卡複習</button>
+      <button class="nav-tab" data-view="quiz">📝 聽力／對譯測驗</button>
+    </nav>
+
+    <div class="header-right">
+      <div class="tts-status-pill" id="ttsStatusPill" title="語音引擎狀態">
+        <span class="dot"></span>
+        <span id="ttsStatusText">偵測微軟語音引擎…</span>
+      </div>
+      <button class="icon-btn" id="btnToggleVoiceBar" title="語音與朗讀設定">🎙️ 語音設定</button>
+      <button class="icon-btn" id="btnToggleTheme" title="切換深色/淺色模式">🌙</button>
+    </div>
+  </header>
+
+  <div class="voice-settings-bar hidden" id="voiceSettingsBar">
+    <div class="setting-item">
+      <strong>日文微軟神經語音：</strong>
+      <select id="selJaVoice">
+        <option value="ja-JP-NanamiNeural">Microsoft Nanami (女聲・自然)</option>
+        <option value="ja-JP-KeitaNeural">Microsoft Keita (男聲・自然)</option>
+      </select>
+    </div>
+    <div class="setting-item">
+      <strong>中文微軟神經語音：</strong>
+      <select id="selZhVoice">
+        <option value="zh-TW-HsiaoChenNeural">Microsoft HsiaoChen (臺灣女聲)</option>
+        <option value="zh-TW-YunJheNeural">Microsoft YunJhe (臺灣男聲)</option>
+      </select>
+    </div>
+    <div class="setting-item">
+      <strong>語速：</strong>
+      <input type="range" id="rngRate" min="0.7" max="1.4" step="0.05" value="1.0" />
+      <span id="lblRate">1.00x</span>
+    </div>
+    <button class="btn" id="btnTestVoice">🔊 測試日／中微軟語音</button>
+    <span id="voiceDetailHint" style="color: var(--text-soft); font-size: 12px;"></span>
+  </div>
+
+  <!-- ========== VIEW 1: MIND MAP ========== -->
+  <section class="view-section active" id="view-mindmap">
+    <div class="mm-toolbar">
+      <input type="search" class="mm-search" id="mmSearch" placeholder="搜尋心智圖節點（日文/假名/中文/英文）…" />
+
+      <div class="seg-group" id="mmFilterGroup">
+        <button class="seg-btn active" data-filter="all">全部</button>
+        <button class="seg-btn" data-filter="A">A 級必背</button>
+        <button class="seg-btn" data-filter="flagged">異譯校對</button>
+        <button class="seg-btn" data-filter="review">待複習</button>
+      </div>
+
+      <div class="seg-group" id="mmLayoutGroup">
+        <button class="seg-btn active" data-layout="radial">雙側心智圖</button>
+        <button class="seg-btn" data-layout="tree">右側階層樹</button>
+      </div>
+
+      <button class="mm-btn" id="btnMmExpandAll">展開 17 主分類</button>
+      <button class="mm-btn" id="btnMmCollapseAll">全部收合</button>
+      <button class="mm-btn" id="btnMmFit">適應畫面</button>
+      <button class="mm-btn" id="btnMmZoomIn">＋</button>
+      <button class="mm-btn" id="btnMmZoomOut">－</button>
+    </div>
+
+    <div class="mm-workspace">
+      <div class="mm-canvas-wrap">
+        <div id="mindmapCanvas" style="width: 100%; height: 100%;"></div>
+        <div class="mm-floating-hint">拖曳空白處移動・滾輪縮放・點擊節點展開子分類／查看詳情・點擊 🔊 立即朗讀</div>
+      </div>
+
+      <aside class="mm-inspector" id="mmInspector">
+        <!-- Populated dynamically -->
+      </aside>
+    </div>
+  </section>
+
+  <!-- ========== VIEW 2: BROWSE & READ-ALOUD ========== -->
+  <section class="view-section" id="view-browse">
+    <div class="player-bar">
+      <div class="player-controls">
+        <button class="btn btn-primary" id="btnPlayPause">▶ 開始連續朗讀</button>
+        <button class="btn" id="btnPrevTerm">⏮ 上一詞</button>
+        <button class="btn" id="btnNextTerm">⏭ 下一詞</button>
+        <button class="btn" id="btnStopPlay">⏹ 停止</button>
+
+        <select id="selPlayMode" title="朗讀順序" class="icon-btn">
+          <option value="jp-zh">日文 → 中文</option>
+          <option value="jp2-zh">日文 ×2 → 中文</option>
+          <option value="zh-jp">中文 → 日文（口譯反應）</option>
+          <option value="jp">僅朗讀日文</option>
+          <option value="zh">僅朗讀中文</option>
+        </select>
+
+        <select id="selPauseMs" title="語句間隔" class="icon-btn">
+          <option value="500">間隔 0.5 秒</option>
+          <option value="900" selected>間隔 0.9 秒</option>
+          <option value="1500">間隔 1.5 秒</option>
+          <option value="2500">間隔 2.5 秒（口譯跟讀）</option>
+        </select>
+
+        <label style="font-size: 12.5px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+          <input type="checkbox" id="chkLoop" /> 循環
+        </label>
+        <label style="font-size: 12.5px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+          <input type="checkbox" id="chkShuffle" /> 隨機
+        </label>
+      </div>
+
+      <div class="player-now" id="playerNowText">就緒：請點選「開始連續朗讀」或任一術語卡片的 🔊</div>
+    </div>
+
+    <div class="filter-bar">
+      <select id="selCat"></select>
+      <select id="selSub"></select>
+      <select id="selImp">
+        <option value="">全部重要度</option>
+        <option value="A">重要度 A（必背）</option>
+        <option value="B">重要度 B（進階）</option>
+        <option value="C">重要度 C（參考）</option>
+      </select>
+      <select id="selMastery">
+        <option value="">全部學習狀態</option>
+        <option value="unmastered">未熟記（含待複習）</option>
+        <option value="review">待複習</option>
+        <option value="mastered">已熟記</option>
+      </select>
+      <label style="font-size: 12.5px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+        <input type="checkbox" id="chkFlagOnly" /> 僅異譯校對
+      </label>
+      <input type="search" id="txtSearch" placeholder="搜尋日文、假名、繁中、英文、現場用途…" />
+      <span id="lblFilterCount" style="font-size: 12.5px; color: var(--text-soft); font-weight: 700;"></span>
+    </div>
+
+    <div class="terms-scroll" id="termsScroll">
+      <div class="terms-grid" id="termsGrid"></div>
+      <div class="pagination-bar" id="paginationBar"></div>
+    </div>
+  </section>
+
+  <!-- ========== VIEW 3: FLASHCARDS ========== -->
+  <section class="view-section" id="view-flashcard">
+    <div class="fc-wrap">
+      <div class="fc-controls">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+          <select id="fcCat" class="icon-btn"></select>
+          <select id="fcImp" class="icon-btn">
+            <option value="">全部重要度</option>
+            <option value="A">僅 A 級必背</option>
+          </select>
+          <select id="fcDir" class="icon-btn">
+            <option value="jp2zh">正面：日文 → 背面：中文</option>
+            <option value="zh2jp">正面：中文 → 背面：日文</option>
+          </select>
+          <label style="font-size: 12.5px; display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="fcShowKana" checked /> 顯示假名
+          </label>
+          <label style="font-size: 12.5px; display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="fcAutoSpeak" checked /> 切換自動朗讀
+          </label>
+          <button class="btn" id="fcShuffleBtn">🔀 洗牌</button>
+        </div>
+        <div id="fcCounter" style="font-size: 13.5px; font-weight: 700; color: var(--text-soft);">0 / 0</div>
+      </div>
+
+      <div class="fc-stage">
+        <div class="fc-card" id="fcCard">
+          <div class="fc-face fc-front" id="fcFront"></div>
+          <div class="fc-face fc-back" id="fcBack"></div>
+        </div>
+      </div>
+
+      <div class="fc-actions">
+        <div style="display: flex; gap: 8px;">
+          <button class="btn" id="fcPrev">← 上一張</button>
+          <button class="btn" id="fcFlip">🔄 翻面 (Space)</button>
+          <button class="btn" id="fcNext">下一張 →</button>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn" id="fcSpeakJp">🔊 日文 (J)</button>
+          <button class="btn" id="fcSpeakZh">🔊 中文 (Z)</button>
+          <button class="btn btn-warn" id="fcMarkReview">⭐ 待複習 (1)</button>
+          <button class="btn btn-ok" id="fcMarkMastered">✅ 已熟記 (2)</button>
+        </div>
+      </div>
+      <div class="shortcut-hint">快捷鍵：Space 翻面 ｜ ← / → 切換 ｜ J 朗讀日文 ｜ Z 朗讀中文 ｜ 1 待複習 ｜ 2 已熟記</div>
+    </div>
+  </section>
+
+  <!-- ========== VIEW 4: QUIZ ========== -->
+  <section class="view-section" id="view-quiz">
+    <div class="quiz-wrap">
+      <div class="fc-controls">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+          <select id="qzCat" class="icon-btn"></select>
+          <select id="qzMode" class="icon-btn">
+            <option value="jp2zh">看日文選繁中</option>
+            <option value="zh2jp">看繁中選日文</option>
+            <option value="listen">🎧 聽日文選繁中（口譯聽力）</option>
+          </select>
+          <button class="btn btn-primary" id="qzNewBtn">🔄 重新出題</button>
+        </div>
+        <div id="qzScore" style="font-size: 14px; font-weight: 800; color: var(--primary);">答對 0 / 0</div>
+      </div>
+
+      <div class="quiz-card" id="quizCard"></div>
+    </div>
+  </section>
+
+  <script src="data/terms_data.js"></script>
+  <script src="tts.js"></script>
+  <script src="mindmap.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
